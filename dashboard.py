@@ -1,73 +1,85 @@
 import streamlit as st
 import pandas as pd
 import plotly.express as px
-from datetime import datetime
+from datetime import date
 
+# -----------------------------
 # Initialize session state for tasks
-if "tasks" not in st.session_state:
-    st.session_state.tasks = []
+# -----------------------------
+if "tasks" not in st.session_state or not isinstance(st.session_state.tasks, pd.DataFrame):
+    st.session_state.tasks = pd.DataFrame(columns=["Title", "Description", "Due Date", "Status"])
 
-# Title
-st.title("Smart Employee Productivity Dashboard")
-st.write("Track tasks, progress, and team productivity.")
+# -----------------------------
+# Sidebar - Add new task
+# -----------------------------
+st.sidebar.header("➕ Add a New Task")
+task_title = st.sidebar.text_input("Task Title")
+task_desc = st.sidebar.text_area("Task Description")
+task_due = st.sidebar.date_input("Due Date", min_value=date.today())
+task_priority = st.sidebar.selectbox("Priority", ["Low", "Medium", "High"])
 
-# Task input form
-st.subheader("Add a New Task")
-with st.form(key="task_form"):
-    employee = st.text_input("Employee Name")
-    task = st.text_input("Task Description")
-    deadline = st.date_input("Deadline")
-    priority = st.selectbox("Priority", ["High", "Medium", "Low"])
-    submitted = st.form_submit_button("Add Task")
-    if submitted:
-        new_task = {
-            "Employee": employee,
-            "Task": task,
-            "Deadline": deadline,
-            "Priority": priority,
-            "Completed": False,
-            "Date Added": datetime.today().date()
-        }
-        st.session_state.tasks.append(new_task)
-        st.success("Task added successfully!")
+if st.sidebar.button("Add Task"):
+    new_task = {
+        "Title": task_title,
+        "Description": task_desc + f" (Priority: {task_priority})",
+        "Due Date": task_due,
+        "Status": "Pending"
+    }
+    st.session_state.tasks = pd.concat([st.session_state.tasks, pd.DataFrame([new_task])], ignore_index=True)
+    st.sidebar.success(f"Task '{task_title}' added!")
 
-# Display current tasks with editable completion status
-st.subheader("Current Tasks")
+# -----------------------------
+# Main Page - Dashboard
+# -----------------------------
+st.title("📊 Smart Employee Productivity Dashboard")
+st.markdown("Track tasks, progress, and team productivity.")
 
-if st.session_state.tasks:
-    # Show tasks with checkboxes for completion
-    for i, task in enumerate(st.session_state.tasks):
-        cols = st.columns([3, 5, 2, 2, 2, 1])
-        cols[0].write(task["Employee"])
-        cols[1].write(task["Task"])
-        cols[2].write(str(task["Deadline"]))
-        cols[3].write(task["Priority"])
-        # Checkbox to mark completed, updating session state
-        completed = cols[4].checkbox("Completed", value=task["Completed"], key=f"completed_{i}")
-        st.session_state.tasks[i]["Completed"] = completed
+# Metrics
+total_tasks = len(st.session_state.tasks)
+completed_tasks = len(st.session_state.tasks[st.session_state.tasks.Status == "Completed"])
+overdue_tasks = len(st.session_state.tasks[(st.session_state.tasks.Status == "Pending") & 
+                                          (st.session_state.tasks["Due Date"] < pd.to_datetime(date.today()))])
 
+col1, col2, col3 = st.columns(3)
+col1.metric("Total Tasks", total_tasks)
+col2.metric("Completed Tasks", completed_tasks)
+col3.metric("Overdue Tasks", overdue_tasks)
+
+# -----------------------------
+# Task Table with status update
+# -----------------------------
+st.subheader("📝 Current Tasks")
+if not st.session_state.tasks.empty:
+    for i in range(len(st.session_state.tasks)):
+        task = st.session_state.tasks.iloc[i]
+        st.write(f"**{task['Title']}** - {task['Description']}")
+        st.write(f"Deadline: {task['Due Date'].date()} | Status: {task['Status']}")
+        if task['Status'] == "Pending":
+            if st.button(f"Mark '{task['Title']}' as Completed", key=i):
+                st.session_state.tasks.at[i, "Status"] = "Completed"
+                st.experimental_rerun()
+        st.markdown("---")
 else:
-    st.write("No tasks added yet.")
+    st.info("No tasks added yet!")
 
-# Analytics
-if st.session_state.tasks:
-    df = pd.DataFrame(st.session_state.tasks)
+# -----------------------------
+# Filters
+# -----------------------------
+st.subheader("🔍 Filter Tasks")
+status_filter = st.selectbox("Filter by Status", ["All", "Pending", "Completed"])
+if status_filter != "All":
+    filtered_tasks = st.session_state.tasks[st.session_state.tasks.Status == status_filter]
+else:
+    filtered_tasks = st.session_state.tasks
+st.dataframe(filtered_tasks)
 
-    # Tasks per employee
-    tasks_per_employee = df.groupby("Employee").size().reset_index(name="Number of Tasks")
-    st.subheader("Tasks per Employee")
-    st.dataframe(tasks_per_employee)
-
-    # Task completion status
-    completion_counts = df["Completed"].value_counts().reset_index()
-    completion_counts.columns = ["Completed", "Count"]
-    st.subheader("Task Completion Status")
-    fig = px.pie(completion_counts, names="Completed", values="Count", title="Task Completion")
+# -----------------------------
+# Visual Analytics
+# -----------------------------
+st.subheader("📈 Task Analytics")
+if total_tasks > 0:
+    fig = px.pie(st.session_state.tasks, names='Status', title="Task Status Distribution")
     st.plotly_chart(fig)
 
-    # Overdue tasks
-    today = datetime.today().date()
-    overdue_tasks = df[(df["Deadline"] < today) & (df["Completed"] == False)]
-    if not overdue_tasks.empty:
-        st.subheader("⚠️ Overdue Tasks")
-        st.dataframe(overdue_tasks)
+    fig2 = px.bar(st.session_state.tasks, x='Due Date', color='Status', title="Tasks by Due Date")
+    st.plotly_chart(fig2)
